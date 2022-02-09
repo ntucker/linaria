@@ -4,15 +4,24 @@
  * returns transformed code without template literals and attaches generated source maps
  */
 
+import fs from 'fs';
 import path from 'path';
 import loaderUtils from 'loader-utils';
+import mkdirp from 'mkdirp';
+import normalize from 'normalize-path';
 import enhancedResolve from 'enhanced-resolve';
+import findYarnWorkspaceRoot from 'find-yarn-workspace-root';
 import type { RawSourceMap } from 'source-map';
+import cosmiconfig from 'cosmiconfig';
 import { EvalCache, Module, Result, transform } from '@linaria/babel-preset';
 import { debug, notify } from '@linaria/logger';
-import { getCacheInstance } from './cache';
 
-const outputCssLoader = require.resolve('./outputCssLoader');
+const workspaceRoot = findYarnWorkspaceRoot();
+const lernaConfig = cosmiconfig('lerna', {
+  searchPlaces: ['lerna.json'],
+}).searchSync();
+const lernaRoot =
+  lernaConfig !== null ? path.dirname(lernaConfig.filepath) : null;
 
 export default function webpack5Loader(
   this: any,
@@ -33,6 +42,7 @@ export default function webpack5Loader(
 
   const {
     sourceMap = undefined,
+    cacheDirectory = '.linaria-cache',
     preprocessor = undefined,
     extension = '.linaria.css',
     cacheProvider,
@@ -40,7 +50,20 @@ export default function webpack5Loader(
     ...rest
   } = this.getOptions() || {};
 
-  const outputFileName = this.resourcePath.replace(/\.[^.]+$/, extension);
+  const root = workspaceRoot || lernaRoot || process.cwd();
+
+  const baseOutputFileName = this.resourcePath.replace(/\.[^.]+$/, extension);
+
+  const outputFilename = normalize(
+    path.join(
+      path.isAbsolute(cacheDirectory)
+        ? cacheDirectory
+        : path.join(process.cwd(), cacheDirectory),
+      this.resourcePath.includes(root)
+        ? path.relative(root, baseOutputFileName)
+        : baseOutputFileName
+    )
+  );
 
   // this._compilation is a deprecated API
   // However there seems to be no other way to access webpack's resolver
@@ -104,6 +127,7 @@ export default function webpack5Loader(
     result = transform(content, {
       filename: path.relative(process.cwd(), this.resourcePath),
       inputSourceMap: inputSourceMap ?? undefined,
+      outputFilename,
       pluginOptions: rest,
       preprocessor,
     });
@@ -134,21 +158,30 @@ export default function webpack5Loader(
       });
     }
 
-    getCacheInstance(cacheProvider)
-      .then((cacheInstance) => cacheInstance.set(this.resourcePath, cssText))
-      .then(() => {
-        const request = `${outputFileName}!=!${outputCssLoader}?cacheProvider=${encodeURIComponent(
-          cacheProvider ?? ''
-        )}!${this.resourcePath}`;
-        const stringifiedRequest = loaderUtils.stringifyRequest(this, request);
+    // Read the file first to compare the content
+    // Write the new content only if it's changed
+    // This will prevent unnecessary WDS reloads
+    let currentCssText;
 
-        return this.callback(
-          null,
-          `${result.code}\n\nrequire(${stringifiedRequest});`,
-          result.sourceMap ?? undefined
-        );
-      })
-      .catch((err: Error) => this.callback(err));
+    try {
+      currentCssText = fs.readFileSync(outputFilename, 'utf-8');
+    } catch (e) {
+      // Ignore error
+    }
+
+    if (currentCssText !== cssText) {
+      mkdirp.sync(path.dirname(outputFilename));
+      fs.writeFileSync(outputFilename, cssText);
+    }
+
+    this.callback(
+      null,
+      `${result.code}\n\nrequire(${loaderUtils.stringifyRequest(
+        this,
+        outputFilename
+      )});`,
+      result.sourceMap ?? undefined
+    );
     return;
   }
 

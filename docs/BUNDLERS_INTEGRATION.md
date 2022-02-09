@@ -178,16 +178,10 @@ The loader accepts the following options:
 
   Setting this option to `true` will include source maps for the generated CSS so that you can see where source of the class name in devtools. We recommend to enable this only in development mode because the sourcemap is inlined into the CSS files.
 
-- `cacheProvider: undefined | string | ICache` (default: `undefined`):
-  By default Linaria use a memory cache to store temporary CSS files. But if you are using this loader with [thread-loader](https://www.npmjs.com/package/thread-loader) you should use some consistent cache to prevent [some unexpected issues](https://github.com/callstack/linaria/issues/881). This options support a `ICache` instance or a path to NodeJS module which export a `ICache` instance as `module.exports`
+- `cacheDirectory: string` (default: `'.linaria-cache'`):
 
-  > ```
-  > interface ICache {
-  >   get: (key: string) => Promise<string>;
-  >   set: (key: string, value: string) => Promise<void>
-  > }
-  > ```
-
+  Path to the directory where the loader will output the intermediate CSS files. You can pass a relative or absolute directory path. Make sure the directory is inside the working directory for things to work properly. **You should add this directory to `.gitignore` so you don't accidentally commit them.**
+  
 - `extension: string` (default: `'.linaria.css'`):
 
   An extension of the intermediate CSS files.
@@ -225,6 +219,7 @@ You can pass options to the loader like so:
   loader: '@linaria/webpack-loader',
   options: {
     sourceMap: false,
+    cacheDirectory: '.linaria-cache',
   },
 }
 ```
